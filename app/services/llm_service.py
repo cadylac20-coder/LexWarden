@@ -1,35 +1,46 @@
 from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
+from app.config import settings
 
-# 1. Define the exact response shape using Pydantic
 class ClauseAssessment(BaseModel):
-    risk_level: str = Field(description="Must be exactly 'GREEN', 'YELLOW', or 'RED'")
-    explanation: str = Field(description="Clear explanation of why this clause is risky or how it departs from standard practice.")
-    suggested_revision: str = Field(description="A safer, corporate-standard way to phrase this clause.")
+    risk_level: str = Field(description="Must evaluate strictly to 'GREEN', 'YELLOW', or 'RED'")
+    explanation: str = Field(description="Deep context explaining legal variations, vulnerabilities, or changes.")
+    suggested_revision: str = Field(description="Alternative legal text compliant with standard templates.")
 
 class LLMService:
     def __init__(self):
-        # The Client automatically reads GEMINI_API_KEY from your .env file
-        self.client = genai.Client()
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        # Using flash for low latency
+        self.model_name = "gemini-2.5-flash"
 
     def assess_clause_risk(self, scanned_clause: str, safe_clause: str) -> ClauseAssessment:
-        prompt = f"""
-        You are an expert corporate legal counsel. Compare the scanned contract clause against our safe standard baseline.
-        Identify if there are any predatory terms, unusual liabilities, or non-standard compliance terms.
-        
-        Scanned Clause from Contract: "{scanned_clause}"
-        Safe Standard Template Baseline: "{safe_clause}"
-        """
-        
-        # 2. Invoke the model using the recommended gemini-2.5-flash for speed and low-latency
-        response = self.client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": ClauseAssessment,  # Enforces the Pydantic structure
-            }
+        system_instruction = (
+            "You are an elite automated contract analyzer and corporate legal officer. Your sole responsibility "
+            "is checking input text variations against gold standard baselines and returning clean structured evaluations."
         )
         
-        # 3. The SDK automatically parses the JSON string directly into your Pydantic class object
+        prompt = f"""
+        Analyze the scanned contract fragment and contrast it against our standard safe baseline.
+        
+        [SCANNED CLAUSE]
+        {scanned_clause}
+        
+        [SAFE BASELINE TEMPLATE]
+        {safe_clause}
+        
+        If the scanned text introduces severe unexpected liabilities, high financial penalties, or removes mutual protections, 
+        mark it as 'RED'. If definitions are asymmetrical or vague, mark it as 'YELLOW'. If standard, mark it as 'GREEN'.
+        """
+        
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                response_schema=ClauseAssessment,
+                temperature=0.1  # Highly deterministic responses
+            )
+        )
         return response.parsed
