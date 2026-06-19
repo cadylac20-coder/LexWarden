@@ -1,19 +1,50 @@
-import anyio # for async file handling if needed
+import io
+import re
+from pypdf import PdfReader
 
 class OCRService:
     @staticmethod
     async def extract_text(file_bytes: bytes) -> str:
-        # TODO: Integrate DocTR, Tesseract, or AWS Textract
-        # For now, we simulate extracting text from a scanned PDF/Image
-        mock_extracted_text = (
-            "Limitation of Liability: The Vendor's total liability under this agreement "
-            "shall be unlimited for any breaches of data privacy, notwithstanding anything "
-            "to the contrary."
-        )
-        return mock_extracted_text
+        """
+        Parses incoming payload streams. 
+        Extracts native digital streams using PyPDF.
+        """
+        try:
+            pdf_file = io.BytesIO(file_bytes)
+            reader = PdfReader(pdf_file)
+            extracted_pages = []
+            
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    extracted_pages.append(text)
+            
+            full_text = "\n".join(extracted_pages)
+            
+            if not full_text.strip():
+                raise ValueError("Document appears empty or contains unreadable scanned image layers.")
+                
+            return full_text
+        except Exception as e:
+            raise RuntimeError(f"OCR Extraction pipeline failure: {str(e)}")
 
     @staticmethod
-    def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
-        # Simple paragraph or character-based splitting
-        # In production, split by sentence or legal clauses
-        return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+    def chunk_text(text: str) -> list[str]:
+        """
+        Splits clean contract streams cleanly based on structural line spaces 
+        and normalizes overlapping fragments.
+        """
+        # Split by typical legal paragraph boundaries
+        paragraphs = re.split(r'\n\s*\n', text)
+        cleaned_chunks = []
+        
+        for para in paragraphs:
+            para_clean = para.strip()
+            if not para_clean:
+                continue
+            # Minimize redundant white spacings inside clauses
+            para_clean = re.sub(r'\s+', ' ', para_clean)
+            if len(para_clean) > 40:  # Avoid single titles or numbers
+                cleaned_chunks.append(para_clean)
+                
+        return cleaned_chunks
